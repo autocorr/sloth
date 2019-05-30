@@ -1,0 +1,4 @@
+[Paths]
+sloth_dir = ~/.sloth
+hist_file = history
+lib_dir = lib

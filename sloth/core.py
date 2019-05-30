@@ -1,18 +1,21 @@
 #!/usr/bin/python3
 
+import os
 import re
 import string
 import tokenize
-from io import StringIO
+from io import FileIO, StringIO
+from pathlib import Path
 from copy import deepcopy
 from collections import deque
 
+from . import CONFIG
 from .errors import VmRuntimeError
 from .primitives import PRIMITIVES
 
 
 TABSTOP = 8
-NUMLIT_RE = re.compile(tokenize.Number)
+NUMLIT_RE = re.compile('(-)?'+tokenize.Number)
 
 
 class Stack(deque):
@@ -48,7 +51,8 @@ class Stack(deque):
 
 class CharStream:
     """
-    A character stream that keeps track of the cursor position.
+    A stream that provides iteration over whitespace separated words, as well
+    as invdividual characters.
     """
     def __init__(self, stream):
         if isinstance(stream, str):
@@ -106,6 +110,8 @@ def is_numeric_literal(name):
 
 
 class VirtualMachine:
+    WARN = True
+
     def __init__(self, stream):
         self.stream = CharStream(stream)
         self.ip = 0
@@ -172,17 +178,38 @@ class VirtualMachine:
             word = self.parse_symbol(symb)
             if self.immediate:
                 self.handle_op(word)
-            elif hasattr(word, 'immediate'):
-                if word.immediate:
-                    self.handle_op(word)
-                else:
-                    self.compile(word)
+            elif hasattr(word, 'immediate') and word.immediate:
+                self.handle_op(word)
             else:
                 self.compile(word)
 
     def read_input(self, text):
         self.make_backup()
         self.stream.write(text)
+
+    def import_module(self, modname):
+        modname += '.sloth'
+        system_path = (
+            Path(os.getcwd()),
+            Path(CONFIG.get('Paths', 'sloth_dir')).expanduser()
+                / Path(CONFIG.get('Paths', 'lib_dir')),
+            Path(__file__).parent.parent / Path('lib'),
+        )
+        for path in system_path:
+            mod_path = path / Path(modname)
+            if mod_path.exists():
+                break
+        else:
+            raise VmRuntimeError(f'Could not find module: "{modname}"')
+        with open(mod_path) as f:
+            text = f.read()
+        mod_vm = VirtualMachine(text)
+        mod_vm.run()
+        public_words = {
+            k: v for k, v in mod_vm.dictionary.items()
+            if hasattr(v, 'hidden') and not v.hidden
+        }
+        self.dictionary.update(public_words)
 
 
 def compute(input_str):
@@ -191,7 +218,5 @@ def compute(input_str):
     print( 'data: {0}'.format(vm.stack))
     print( 'retn: {0}'.format(vm.return_stack))
     print(f'  ip: {vm.ip}')
-
-
 
 

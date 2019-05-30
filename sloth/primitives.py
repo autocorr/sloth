@@ -6,6 +6,8 @@ import textwrap
 from functools import wraps
 from collections import deque
 
+from termcolor import colored
+
 from .errors import VmRuntimeError, WordExit
 
 
@@ -45,10 +47,10 @@ class DefinedWord(Word):
         while True:
             try:
                 op = self.code[vm.ip]
-                vm.handle_op(op)
-                vm.ip += 1
             except (IndexError, WordExit):
                 break
+            vm.handle_op(op)
+            vm.ip += 1
         vm.exit()
         vm.frame_stack.pop()
 
@@ -124,9 +126,34 @@ def oneminus(vm):
     vm.stack.top -= 1
 
 
+@RegisterBuiltin('max')
+def max_(vm):
+    vm.stack.binary_op(max)
+
+
+@RegisterBuiltin('min')
+def min_(vm):
+    vm.stack.binary_op(min)
+
+
+@RegisterBuiltin('abs')
+def abs_(vm):
+    vm.stack.unary_op(abs)
+
+
 ##############################################################################
 #                           Comparison and Logical
 ##############################################################################
+
+@RegisterBuiltin('True')
+def true(vm):
+    vm.stack.push(True)
+
+
+@RegisterBuiltin('False')
+def false(vm):
+    vm.stack.push(False)
+
 
 @RegisterBuiltin('=')
 def eq(vm):
@@ -156,6 +183,31 @@ def ge(vm):
 @RegisterBuiltin('<=')
 def le(vm):
     vm.stack.binary_op(operator.le)
+
+
+@RegisterBuiltin('0=')
+def zero_eq(vm):
+    vm.stack.push(vm.stack.top == 0)
+
+
+@RegisterBuiltin('0<>')
+def zero_ne(vm):
+    vm.stack.push(vm.stack.top != 0)
+
+
+@RegisterBuiltin('0<')
+def zero_lt(vm):
+    vm.stack.push(vm.stack.top < 0)
+
+
+@RegisterBuiltin('0>')
+def zero_gt(vm):
+    vm.stack.push(vm.stack.top > 0)
+
+
+@RegisterBuiltin('1=')
+def one_eq(vm):
+    vm.stack.push(vm.stack.top == 1)
 
 
 @RegisterBuiltin('not')
@@ -202,6 +254,12 @@ def over(vm):
     vm.stack.push(vm.stack[-2])
 
 
+@RegisterBuiltin('2over')
+def two_over(vm):
+    vm.stack.push(vm.stack[-4])
+    vm.stack.push(vm.stack[-4])
+
+
 @RegisterBuiltin()
 def rot(vm):
     ds = vm.stack
@@ -238,8 +296,14 @@ def pick(vm):
 
 
 @RegisterBuiltin()
-def clear(vm):
+def clearstack(vm):
     vm.stack.clear()
+
+
+@RegisterBuiltin()
+def clearstacks(vm):
+    vm.stack.clear()
+    vm.return_stack.clear()
 
 
 ##############################################################################
@@ -261,14 +325,33 @@ def rdrop(vm):
     vm.return_stack.pop()
 
 
-@RegisterBuiltin('>here')
-def herepush(vm):
-    vm.ip = vm.stack.pop()
+@RegisterBuiltin('rp@')
+def rpointer(vm):
+    vm.stack.push(len(vm.return_stack))
 
 
-@RegisterBuiltin('here>')
-def herepop(vm):
-    vm.stack.push(vm.ip)
+@RegisterBuiltin('r+')
+def rplus(vm):
+    vm.return_stack.top += 1
+
+
+@RegisterBuiltin('r-')
+def rplus(vm):
+    vm.return_stack.top -= 1
+
+
+@RegisterBuiltin('i')
+def eye(vm):
+    vm.stack.push(vm.return_stack.top)
+
+
+@RegisterBuiltin()
+def here(vm):
+    try:
+        adr = len(vm.last_word.code)
+        vm.stack.push(adr)
+    except AttributeError:
+        raise VmRuntimeError('Error in "here": no previously compiled word')
 
 
 @RegisterBuiltin()
@@ -277,6 +360,11 @@ def exit(vm):
         raise VmRuntimeError('Error in "exit": cannot exit outside of a definition')
     else:
         raise WordExit
+
+
+@RegisterBuiltin('.r')
+def print_rstack(vm):
+    print(vm.return_stack)
 
 
 ##############################################################################
@@ -301,11 +389,8 @@ def key(vm):
 
 @RegisterBuiltin()
 def word(vm):
-    try:
-        name = next(vm.stream)
-        vm.stack.push(name)
-    except StopIteration:
-        raise VmRuntimeError('Error in "word": cannot read word, end of stream')
+    symb = vm.next_symbol()
+    vm.stack.push(symb)
 
 
 ##############################################################################
@@ -383,6 +468,16 @@ def bang(vm):
     vm.heap[adr] = v
 
 
+@RegisterBuiltin('w!')
+def word_bang(vm):
+    adr = vm.stack.pop()
+    v = vm.stack.pop()
+    try:
+        vm.last_word.code[adr] = v
+    except IndexError:
+        raise VmRuntimeError(f'Address "{adr}" out of bounds')
+
+
 @RegisterBuiltin('+!')
 def plus_bang(vm):
     adr = vm.stack.pop()
@@ -413,6 +508,16 @@ def at(vm):
         raise VmRuntimeError(f'Address "{adr}" uninitialized')
 
 
+@RegisterBuiltin('w@')
+def word_at(vm):
+    adr = vm.stack.pop()
+    try:
+        v = vm.last_word.code[adr]
+        vm.stack.push(v)
+    except IndexError:
+        raise VmRuntimeError(f'Address "{adr}" out of bounds')
+
+
 @RegisterBuiltin('.m')
 def dotm(vm):
     for k, v in vm.heap.items():
@@ -420,15 +525,21 @@ def dotm(vm):
 
 
 ##############################################################################
-#                                Other
+#                             Parsing Words
 ##############################################################################
-
-# TODO
-# lit
 
 @RegisterBuiltin(immediate=True)
 def immediate(vm):
     vm.last_word.immediate = True
+
+
+@RegisterBuiltin('immediate?')
+def immediateq(vm):
+    word = vm.stack.pop()
+    try:
+        vm.stack.push(word.immediate)
+    except AttributeError:
+        raise VmRuntimeError(f'Immediate flag not defined for "{word}"')
 
 
 @RegisterBuiltin()
@@ -460,25 +571,45 @@ def interpretq(vm):
     vm.stack.push(vm.immediate)
 
 
+@RegisterBuiltin("[']")
+def compiled_tick(vm):
+    word = vm.next_compiled_instr()
+    vm.stack.push(word)
+    vm.ip += 1
+
+
 @RegisterBuiltin("'")
-def tick(vm):
+def interp_tick(vm):
     symb = vm.next_symbol()
-    try:
-        word = vm.dictionary[symb]
-        vm.stack.push(word)
-    except KeyError:
-        raise VmRuntimeError(f'Undefined symbol: "{symb}"')
+    word = vm.parse_symbol(symb)
+    vm.stack.push(word)
+
+
+@RegisterBuiltin('does>')
+def does(vm):
+    word = vm.frame_stack.top
+    ops = word.code[vm.ip+1:]
+    vm.last_word.code.extend(ops)
+    raise WordExit
 
 
 @RegisterBuiltin(',')
 def comma(vm):
     word = vm.stack.pop()
-    vm.last_word.code.push(word)
+    vm.last_word.code.append(word)
+
+
+@RegisterBuiltin()
+def lastword(vm):
+    vm.stack.push(vm.last_word)
 
 
 @RegisterBuiltin()
 def create(vm):
     symb = vm.next_symbol()
+    if symb in vm.dictionary and vm.WARN:
+        red_warn = colored('Warning:', 'red')
+        print(red_warn, f'redefining "{symb}" in dictionary')
     word = DefinedWord(symb)
     vm.insert_word(word)
 
@@ -502,8 +633,41 @@ def hidden(vm):
     vm.last_word.hidden = True
 
 
+@RegisterBuiltin('import', immediate=True)
+def import_module(vm):
+    symb = vm.next_symbol()
+    vm.import_module(symb)
+
+
+##############################################################################
+#                          Virtual Machine State
+##############################################################################
+
+@RegisterBuiltin('toggle-warnings')
+def toggle_warnings(vm):
+    vm.WARN = not vm.WARN
+    state = 'on' if vm.WARN else 'off'
+    print(f'Warnings turned {state}')
+
+
+##############################################################################
+#                              Interpreter
+##############################################################################
+
 @RegisterBuiltin()
 def bye(vm):
     sys.exit(0)
+
+
+@RegisterBuiltin()
+def pdb(vm):
+    import ipdb
+    ipdb.set_trace()
+
+
+@RegisterBuiltin()
+def decompile(vm):
+    xt = vm.stack.pop()
+    print(xt.code)
 
 

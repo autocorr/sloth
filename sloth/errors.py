@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 
-class VmRuntimeError(Exception):
+
+class SlothError(Exception):
     pass
 
 
-class WordExit(Exception):
+class VmRuntimeError(SlothError):
+    pass
+
+
+class WordExit(SlothError):
     pass
 
 

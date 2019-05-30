@@ -1,0 +1,52 @@
+\ Sloth standard library
+
+
+: nop ;
+: 2drop ( a b --  )  drop drop ;
+: 3drop ( a b c --  )  drop drop drop ;
+: 2dup ( a b -- a b a b )  over over ;
+: 3dup ( a b c -- a b c a b c )  dup 2over rot ;
+
+: [compile] immediate
+  (" Compile an otherwise immediate word ")
+  ' , ;
+
+: 0branch, hidden ( -- )  ['] 0branch , ;
+: branch, hidden ( -- )  ['] branch , ;
+
+: back-ref ( -- )  here - 1- , ;
+: prepare-forward-ref ( -- a )  here 0 , ;
+: resolve-forward-ref ( a -- )  here over - 1- swap w! ;
+
+: begin immediate  here ;
+: again immediate  branch, back-ref ;
+: until immediate  0branch, back-ref ;
+
+: while immediate  0branch, prepare-forward-ref ;
+: repeat immediate  swap branch, back-ref resolve-forward-ref ;
+
+: if immediate  0branch, prepare-forward-ref ;
+: else immediate  branch, prepare-forward-ref swap resolve-forward-ref ;
+: then immediate  resolve-forward-ref ;
+
+: unloop  r> r> r> 2drop >r ;
+: do immediate
+  ['] swap , ['] >r , ['] >r ,
+  0 ( do ) here ( back-ref ) ;
+: ?do immediate
+  ['] 2dup , ['] swap , ['] >r , ['] >r ,
+  ['] <> , ['] branch0 , prepare-forward-ref
+  1 ( ?do ) here ( back-ref ) ;
+: bounds ( start len -- limit start )  over + swap ;
+\ : loop immediate
+\   ['] r+ , ['] i , ['] rp@ ,
+\   ['] >= ['] branch0 , back-ref ,
+\   ;
+
+
+: constant  ( n --  , input: name )
+  (" Create a compile time constant ")
+  create , [compile] immediate
+  does> interpret? not if , then ;
+
+

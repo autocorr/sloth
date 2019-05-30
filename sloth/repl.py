@@ -88,7 +88,7 @@ def get_bindings():
     return key_bindings_manager
 
 
-def bok_prompt(vm):
+def sloth_prompt(vm):
     completer = get_completer(vm)
     toolbar = get_toolbar(vm)
     key_bindings_manager = get_bindings()
@@ -114,9 +114,10 @@ def repl():
     print('Hit CTRL+D or type "bye" to quit.')
     red_err = colored('Error:', 'red')
     vm = VirtualMachine('')
+    vm.import_module('std')
     while True:
         try:
-            source = bok_prompt(vm)
+            source = sloth_prompt(vm)
             vm.read_input(source)
             vm.run()
         except (VmRuntimeError, RuntimeError, KeyError, IndexError) as e:
